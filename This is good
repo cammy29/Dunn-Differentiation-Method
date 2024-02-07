@@ -1,0 +1,616 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Jan 19 15:13:38 2024
+
+@author: Cammy :D
+"""
+###############################################################################
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.integrate import trapz
+from scipy.optimize import curve_fit
+from scipy.interpolate import interp1d
+from scipy.signal import find_peaks
+from adjustText import adjust_text
+###############################################################################
+
+# Construct the full file path
+folder_path = r'C:\Users\admin\Desktop\Results\Batch 1\Excel Data'
+file_prefix = 'CR-06'  # Assuming a common prefix
+filename = os.path.join(folder_path, f'{file_prefix}.xlsx')
+
+###############################################################################
+
+# Extract data for different scan rates
+
+scan_rates = np.array([0.001, 0.002, 0.005, 0.01, 0.02, 0.1])  # Updated scan rate values
+data_sets = []
+min_samples = 1000
+
+for scan_rate in scan_rates:
+    sheet_name = str(scan_rate)  # Assuming sheet names are scan rates
+    data_total = pd.read_excel(filename, sheet_name, skiprows=60, usecols=[5,7,8,9])
+    data_cycle2 = data_total[(data_total.iloc[:, 3] > 1) & (data_total.iloc[:, 3] < 3)]
+    potential_cycle2 = data_cycle2.iloc[:, 1]
+    current_cycle2 = data_cycle2.iloc[:, 2] 
+    row_count = potential_cycle2. shape[0]
+    scanrate_matrix= np.full((row_count,),scan_rate)
+    yAxis=current_cycle2/(np.sqrt(scanrate_matrix))
+    xAxis=np.sqrt(scanrate_matrix)
+    matrix=np.column_stack((potential_cycle2,current_cycle2,scanrate_matrix))
+    
+    Cathodic_Potential_matrix = matrix[(matrix[:,1]<0) & (matrix[:,0]>-0.30)& (matrix[:,0]<0.3)]
+    CathodicPotential=Cathodic_Potential_matrix[:,0]
+    CathodicCurrent=Cathodic_Potential_matrix[:,1]
+    
+    Anodic_Potential_matrix = matrix[(matrix[:,1]>0) & (matrix[:,0]<0.30)& (matrix[:,0]>-0.3)]
+    AnodicPotential=Anodic_Potential_matrix[:,0]
+    AnodicCurrent=Anodic_Potential_matrix[:,1] # I hate coding it's horrible :(
+    
+    total_potential = matrix[:, 0]
+    total_current = matrix[:, 1]
+    
+    time_data = data_cycle2.iloc[:, 0]
+    time_data_new = time_data - np.min(time_data)
+    time_data_percent = time_data_new / np.max(time_data_new)
+
+
+    # Transpose the cathodic potential matrix
+    transposed_cathode = Cathodic_Potential_matrix.T
+    xp_potential = transposed_cathode[0, ...]
+    yp_currentDensity = transposed_cathode[1, ...]
+
+    # Create the interpolation function for the cathodic data
+    cathodic_interp = interp1d(xp_potential, yp_currentDensity, fill_value='extrapolate')
+
+    # Create an array of x values for which you want the interpolated y values
+    x_values = np.linspace(-0.26, 0.26, min_samples)
+
+    # Call the interpolation function with these x values
+    cathodecurr = cathodic_interp(x_values)
+    cathodepot = x_values
+
+    # Do the same for the anodic data
+    transposed_anode = Anodic_Potential_matrix.T
+    xp = transposed_anode[0, ...]
+    yp = transposed_anode[1, ...]
+
+    anodic_interp = interp1d(xp, yp, fill_value='extrapolate')
+    anodecurr = anodic_interp(x_values)
+    anodepot = x_values
+
+
+
+
+
+   
+    data_sets.append({'scan_rate': scan_rate, 'potential_cycle2': potential_cycle2,
+                      'current_cycle2': current_cycle2, 'time_data_percent': time_data_percent, 
+                      'time_data_new':time_data_new,'xAxis':xAxis,'yAxis':yAxis, 
+                      'CathodicCurrent':cathodecurr, 'CathodicPotential':cathodepot,
+                      "AnodicCurrent":anodecurr, "AnodicPotential":anodepot})
+    
+###############################################################################
+
+
+
+# Plot current vs. potential
+plt.figure()
+for data_set in data_sets:
+    plt.plot(data_set['potential_cycle2'], data_set['current_cycle2'], label=f"{data_set['scan_rate']} V/s")
+plt.xlabel('Potential vs NHE (V)')
+plt.ylabel('Current Density (mA/cm$^{2})$')
+plt.legend(loc='best')  # Updated to 'best'
+plt.title('Current vs Potential')
+plt.show()
+
+###############################################################################
+
+
+#print("Plotted Current vs Potential")
+plt.figure()
+for data_set in data_sets:
+    plt.plot(data_set['time_data_new'],data_set['current_cycle2'], label=f"{data_set['scan_rate']} V/s")
+plt.xlabel('Cycle Time (s)')
+plt.ylabel('Current Density (mA/cm$^{2})$')
+plt.legend(loc='best')  # Updated to 'best'
+plt.title('Current vs Cycle Time')
+plt.show()
+
+###############################################################################
+
+
+#print("Plotted Current vs Cycle Time Normalised")
+plt.figure()
+for data_set in data_sets:
+    plt.plot(data_set['time_data_percent'],data_set['current_cycle2'], label=f"{data_set['scan_rate']} V/s")
+plt.xlabel('Cycle Completion')
+plt.ylabel('Current Density (mA/cm$^{2})$')
+plt.legend(loc='best')  # Updated to 'best'
+plt.title('Current vs Cycle Time')
+plt.show()
+
+###############################################################################
+
+
+#print("Plotted Current vs Cycle Time Percent")
+areas_total=[]
+for data_set in data_sets:
+    area = np.abs(trapz(data_set['current_cycle2'], data_set['time_data_new'])) / 3600
+    areas_total.append(area)
+    
+# Display the table of areas
+areas_table = pd.DataFrame({'Scan Rate (V/s)': scan_rates, 'Capacity (mAh/cm^2)': areas_total})
+
+#print("\nTable of Areas:")
+print(areas_table)
+
+
+###############################################################################
+#Bar plot of areas against different scan rates
+
+plt.figure()
+bar_width = (max(scan_rates) - min(scan_rates)) / len(scan_rates) * 0.05 # for example, 80% of the average distance between scan rates
+plt.bar(scan_rates, areas_total, width=bar_width, color='red')
+plt.xlabel('Scan rate (V/s)')
+plt.ylabel('Capacity (mAh/cm$^{2}$)')
+plt.title('Bar Plot of Capacity vs Scanrate')
+plt.show()
+print("Plotted Bar Plot of Capacity vs Scan rate")
+
+plt.figure()
+plt.plot(scan_rates, areas_total, color='black')
+plt.scatter(scan_rates, areas_total, color='black', marker = 'x', label = 'Data points')
+plt.xlabel('Scan rate (V/s)')
+plt.ylabel('Capacity (mAh/cm$^{2}$)')
+plt.title('Bar Plot of Capacity vs Scanrate')
+plt.show()
+print("Plotted Bar Plot of Capacity vs Scan rate")
+
+###############################################################################
+# Linear Dunn Method
+# 
+
+peaks_data_0_1_Vs = pd.DataFrame()
+data_set_0_1_Vs = next((item for item in data_sets if item['scan_rate'] == 0.1), None)
+if data_set_0_1_Vs is not None:
+    potential = data_set_0_1_Vs['potential_cycle2']
+    current = data_set_0_1_Vs['current_cycle2']
+    peaks, properties = find_peaks(current, height=0, prominence=0)  # Adjust height and prominence as needed
+    peak_heights = properties['peak_heights']
+    prominences = properties['prominences']
+    scores = peak_heights * prominences
+    sorted_peak_indices = np.argsort(scores)[::-1][:3]
+    top_peaks = peaks[sorted_peak_indices]
+    top_peak_potentials = potential.iloc[top_peaks]
+    top_peak_currents = current.iloc[top_peaks]
+    peaks_data_0_1_Vs = pd.DataFrame({'Peak Potential': top_peak_potentials,'Peak Current': top_peak_currents})
+print(peaks_data_0_1_Vs)
+
+
+plt.figure()
+plt.plot(data_set_0_1_Vs['potential_cycle2'], data_set_0_1_Vs['current_cycle2'], label='0.1 V/s curve')
+for index, row in peaks_data_0_1_Vs.iterrows():
+    plt.plot(row['Peak Potential'], row['Peak Current'], 'x')  # 'ro' creates red circle markers
+for i, row in peaks_data_0_1_Vs.iterrows():
+    plt.annotate(f'{row["Peak Current"]:.2f} mA/cm²', (row['Peak Potential'], row['Peak Current']), textcoords="offset points", xytext=(0,-25), ha='center')
+plt.xlabel('Potential vs NHE (V)')
+plt.ylabel('Current Density (mA/cm$^{2}$)')
+plt.title('Extracted Peaks for 0.1 V/s Scan Rate')
+plt.legend()
+plt.show()
+
+
+
+
+
+max_currents = [np.max(data_set['current_cycle2']) for data_set in data_sets]
+log_scan_rate = np.log(scan_rates)
+log_current = np.log(max_currents)
+
+# Plot Log of Scan rate vs Log of Current
+plt.figure(),    
+plt.plot(log_scan_rate, log_current)
+plt.xlabel('log(Scan rate) (V/s)')
+plt.ylabel('Log(current) (mA)')
+plt.title('Log of Scanrate vs Log of Current')
+
+###############################################################################
+
+
+# Perform linear fit
+def linear_fit(x, m, c):
+    return m * x + c
+p, _ = curve_fit(linear_fit, log_scan_rate, log_current)
+plt.plot(log_scan_rate, linear_fit(log_scan_rate, *p), 'r--', label=f'Fit: m={p[0]:.4f}, c={p[1]:.4f}')
+plt.legend()
+plt.show()
+print("Plotted Log of Scanrate vs Log of Current")
+print(p,)
+'''
+for data in data_sets:
+    plt.plot(data_set['xAxis'], data_set['yAxis'])
+plt.xlabel('v$^{0.5})$')
+plt.ylabel('i/v$^{0.5})$')
+plt.legend(loc='best')  # Updated to 'best'
+plt.show()
+print("Plotted Current vs Cycle Time Percent")
+ 
+for data in data_sets:
+    plt.plot(data_set['CathodicPotential'], data_set['CathodicCurrent'])
+
+
+transposed = Cathodic_Potential_matrix.T
+
+x = np.linspace(-0.005, -0.25, len(transposed[0]))[::-1]
+xp = transposed[0,...][::-1]
+yp = transposed[1,...][::-1]
+
+y = np.interp(x, xp, yp)[::-1]
+
+plt.figure()
+plt.plot(xp[::-1], yp[::-1])
+plt.show()
+
+interpolated = np.array([x[::-1], y, transposed[2,...]])
+'''
+
+per_scanrate = np.array([
+    np.array([
+        d["CathodicPotential"],
+        d["CathodicCurrent"],
+        np.full((min_samples, ), d["scan_rate"])
+    ])
+    for d in data_sets
+])
+
+cathode_currents = []
+
+plt.figure()
+for i in range(min_samples):
+    this_scanrate = per_scanrate[:, :, i]
+    potential, current, scanrate = this_scanrate.T
+    sr = np.sqrt(scanrate)
+   # print(current)
+#    plt.plot(sr, current/sr)
+    p, _ = curve_fit(linear_fit, sr, current/sr)
+    k1, k2 = p
+    cathode_currents.append(k1*scanrate + k2*scanrate)
+    
+
+#plt.show()
+
+plt.figure()
+pot_cathode = per_scanrate[0, 0, ...]
+#plt.plot(pot_cathode, np.array(cathode_currents))
+#plt.show()
+
+
+per_scanrate = np.array([
+    np.array([
+        d["AnodicPotential"],
+        d["AnodicCurrent"],
+        np.full((min_samples, ), d["scan_rate"])
+    ])
+    for d in data_sets
+])
+
+anode_currents = []
+
+plt.figure()
+for i in range(min_samples):
+    this_scanrate = per_scanrate[:, :, i]
+    potential, current, scanrate = this_scanrate.T
+    sr = np.sqrt(scanrate)
+    #print(current)
+#   plt.plot(sr, current/sr)
+    p, _ = curve_fit(linear_fit, sr, current/sr)
+    k1, k2 = p
+    anode_currents.append(k1*scanrate + k2*scanrate)
+
+pot_anode = per_scanrate[0, 0, ...]
+
+cathode_currents = np.array(cathode_currents).T
+anode_currents = np.array(anode_currents).T
+'''
+for ca, an in zip(cathode_currents, anode_currents):
+    plt.figure()
+    plt.plot(
+        np.concatenate((pots, pots[::-1], pots, pots[::-1])), 
+        np.concatenate((an, ca, an, ca))
+    )
+    plt.show()
+
+plt.show()
+
+plt.figure()
+pots = per_scanrate[0, 0, ...]
+plt.plot(pots, np.array(anode_currents))
+plt.show()
+
+y = np.array(cathode_currents + anode_currents + cathode_currents + anode_currents)
+x = np.concatenate((pots, pots[::-1], pots, pots[::-1]))
+
+a = np.array(cathode_currents) - np.array(anode_currents)
+plt.figure()
+plt.plot(x, y)
+plt.show()
+'''
+
+x = np.linspace(-0.33, 0.3, min_samples)
+xp = data_sets[-1]["potential_cycle2"]
+yp = data_sets[-1]["current_cycle2"]
+y = interp1d(xp, yp)(x)
+curr = y
+pot  = x
+
+#print(xp)
+'''
+plt.figure()
+plt.plot(data_sets[-1]["CathodicPotential"], data_sets[-1]["CathodicCurrent"])
+plt.plot(data_sets[-1]["AnodicPotential"], data_sets[-1]["AnodicCurrent"])
+plt.plot(pot_cathode, cathode_currents[-1])
+plt.plot(pot_anode, anode_currents[-1])
+plt.xlabel('Potential vs NHE (V)')
+plt.ylabel('Current Density (mA/cm$^{2})$')
+plt.legend(loc='best')  # Updated to 'best'
+plt.legend()
+plt.title('Current xxvs Potential')
+#plt.show()
+'''
+'''
+plt.figure()  # Start a new figure for each scan rate
+for data_set in data_sets:
+    plt.plot(data_set['CathodicPotential'], data_set['CathodicCurrent'], label='Cathodic Current')
+    plt.plot(data_set['AnodicPotential'], data_set['AnodicCurrent'], label='Anodic Current')
+    plt.xlabel('Potential vs NHE (V)')
+    plt.ylabel('Current Density (mA/cm$^{2}$)')
+    plt.title(f'Current vs Potential for {data_set["scan_rate"]} V/s')
+    plt.le'gend()
+    plt.show()
+'''
+'''
+# ... previous code ...
+
+# Assuming you have already defined the following variables:
+# cathodepot, cathodecurr, anodepot, anodecurr
+#Why is this so difficult im not a fan >:(
+#I am so glad no-one will ever look at this horrible code hahahaha
+# Define the new range for the cathodic and anodic potentials
+extended_cathode_pot = np.linspace(min(cathodepot), max(cathodepot), min_samples)
+extended_anode_pot = np.linspace(min(anodepot), max(anodepot), 5000)
+
+# Create interpolation functions with extrapolation allowed
+cathodic_interp = interp1d(cathodepot, cathodecurr, kind='cubic', fill_value='extrapolate')
+anodic_interp = interp1d(anodepot, anodecurr, kind='cubic', fill_value='extrapolate')
+
+# Use the interpolation functions to calculate the new current values
+extended_cathode_curr = cathodic_interp(extended_cathode_pot)
+extended_anode_curr = anodic_interp(extended_anode_pot)
+
+# Plot the extended lines
+plt.figure()
+plt.plot(extended_cathode_pot, extended_cathode_curr, label='Extended Cathodic Current')
+I wonder who will steal this code from github
+plt.plot(extended_anode_pot, extended_anode_curr, label='Extended Anodic Current')
+plt.xlabel('Potential vs NHE (V)')
+plt.ylabel('Current Density (mA/cm^2)')
+plt.legend()
+plt.title('Extended Current vs Potential')
+plt.show()
+'''
+# ... previous code ...
+
+# Assuming that 'cathodepot' and 'anodepot' contain the potential values
+# for the cathodic and anodic data respectively, and that 'cathodecurr' and
+# 'anodecurr' contain the corresponding current values.
+
+# Define the full potential range from the existing data
+full_potential_range = np.linspace(min(cathodepot), max(anodepot), min_samples)
+
+# Create interpolation functions without extrapolation
+cathodic_interp = interp1d(cathodepot, cathodecurr, kind='linear', bounds_error=False)
+anodic_interp = interp1d(anodepot, anodecurr, kind='linear', bounds_error=False)
+
+# Interpolate (or extrapolate if needed) the current values over the full potential range
+full_cathodic_current = cathodic_interp(full_potential_range)
+full_anodic_current = anodic_interp(full_potential_range)
+
+# Replace any NaN values that result from extrapolation with the nearest non-NaN value
+full_cathodic_current = np.nan_to_num(full_cathodic_current, nan=np.nanmin(cathodecurr))
+full_anodic_current = np.nan_to_num(full_anodic_current, nan=np.nanmax(anodecurr))
+
+# Plot the full range current vs. potential
+plt.figure()
+plt.plot(full_potential_range, full_cathodic_current, label='Cathodic Current')
+plt.plot(full_potential_range, full_anodic_current, label='Anoditttc Current')
+plt.xlabel('Potential vs NHE (V)')
+plt.ylabel('Current Density (mA/cm^2)')
+plt.legend()
+plt.title('Full Range Current vs Potential')
+plt.show()
+
+
+
+###############################################################################
+# ich bin shnitzel flughafen ist ein hauptbahnhof strudel
+'''
+plt.figure()
+plt.plot(data_sets[-1]["CathodicPotential"], data_sets[-1]["CathodicCurrent"])
+plt.plot(data_sets[-1]["AnodicPotential"], data_sets[-1]["AnodicCurrent"])
+plt.plot(pot_cathode, cathode_currents[-1])
+plt.plot(pot_anode, anode_currents[-1])
+plt.xlabel('Potential vs NHE (V)')
+plt.ylabel('Current Density (mA/cm$^{2})$')
+plt.legend(loc='best')  # Updated to 'best'
+plt.legend()
+plt.title('Current vs Potential')
+plt.show()
+
+per_scanrate = np.array([
+    np.array([
+        d["AnodicPotential"],
+        d["AnodicCurrent"],
+        np.full((min_samples, ), d["scan_rate"])
+    ])
+    for d in data_sets
+])
+
+for i in range(len(scan_rates)):
+    plt.figure()
+    plt.plot(data_sets[i]["CathodicPotential"], data_sets[i]["CathodicCurrent"])
+    plt.plot(data_sets[i]["AnodicPotential"], data_sets[i]["AnodicCurrent"])
+    plt.plot(pot_cathode, cathode_currents[i])
+    plt.plot(pot_anode, anode_currents[i])
+    plt.xlabel('Potential vs NHE (V)')
+    plt.ylabel('Current Density (mA/cm$^{2})$')
+    plt.legend(loc='best')  # Updated to 'best'
+    plt.legend()
+    plt.title('Current vs Potential')
+    plt.show()
+'''
+# Same as above but using subplots for space But no grey shading used
+'''
+rows = 2
+cols = 3
+num_subplots = len(scan_rates)
+fig, axs = plt.subplots(rows, cols, figsize=(20, 10))  # For example, a 15x10 figure size
+axs = axs.flatten()
+for i in range(num_subplots):
+    axs[i].plot(data_sets[i]["CathodicPotential"], data_sets[i]["CathodicCurrent"], label='Cathodic total')
+    axs[i].plot(data_sets[i]["AnodicPotential"], data_sets[i]["AnodicCurrent"], label='Anodic total')
+    axs[i].plot(pot_cathode, cathode_currents[i], label='Cathode Intercalation')
+    axs[i].plot(pot_anode, anode_currents[i], label='Anode Intercalation')
+    axs[i].set_xlabel('Potential vs NHE (V)')
+    axs[i].set_ylabel('Current Density (mA/cm$^{2})$')
+    axs[i].set_title('Current vs Potential - Scan Rate {}'.format(scan_rates[i])+' V/s')
+    axs[i].legend(loc='best')
+for j in range(num_subplots, rows * cols):
+    axs[j].axis('off')
+plt.tight_layout()  
+plt.show() 
+'''
+
+rows = 2
+cols = 3
+num_subplots = len(scan_rates)
+fig, axs = plt.subplots(rows, cols, figsize=(20, 10))  # For example, a 15x10 figure size
+axs = axs.flatten()
+area_between_lines_1 = []
+area_between_lines_2 = []
+for i in range(num_subplots):
+    cathodic_potential = data_sets[i]["CathodicPotential"]
+    cathodic_current = data_sets[i]["CathodicCurrent"]
+    anodic_current = data_sets[i]["AnodicCurrent"]
+    axs[i].plot(cathodic_potential, cathodic_current, label='Cathodic total')
+    axs[i].plot(cathodic_potential, anodic_current, label='Anodic total')
+    axs[i].fill_between(pot_cathode, cathode_currents[i], anode_currents[i], color='gray', alpha=0.5)
+    axs[i].plot(pot_cathode, cathode_currents[i], label='Cathode Intercalation')
+    axs[i].plot(pot_anode, anode_currents[i], label='Anode Intercalation')
+    axs[i].set_xlabel('Potential vs NHE (V)')
+    axs[i].set_ylabel('Current Density (mA/cm$^{2})$')
+    axs[i].set_title('Current vs Potential - Scan Rate {}'.format(scan_rates[i])+' V/s')
+    axs[i].legend(loc='best')
+    
+    
+    # Calculate the absolute difference between the currents
+    absolute_difference = abs(cathode_currents[i] - anode_currents[i])
+    absolute_area1 = trapz(absolute_difference, pot_cathode)
+    print(f"Absolute area between red and green lines for subplot {i+1}: {absolute_area1} mA*V/cm^2")
+    
+    absolute_difference2 = abs(cathodic_current - anodic_current)
+    absolute_area2 = trapz(absolute_difference2, cathodic_potential)
+    print(f"Absolute area between orange and blue lines for subplot {i+1}: {absolute_area2} mA*V/cm^2")
+    
+    area_between_lines_1.append(absolute_area1)  # Append the calculated absolute area to the list
+    area_between_lines_2.append(absolute_area2)  # Append the calculated absolute area to the list
+
+    
+for j in range(num_subplots, rows * cols):
+    axs[j].axis('off')
+plt.tight_layout()  
+plt.show() 
+
+
+# Making the cool bar charts
+total_heights = area_between_lines_2
+part_heights = area_between_lines_1
+percentages = [(part / total) * 100 if total > 0 else 0 for total, part in zip(total_heights, part_heights)]
+plt.bar(range(num_subplots), total_heights, color='#404040', width=0.4, label='Total')
+plt.bar(range(num_subplots), part_heights, color='#A0A0A0', width=0.4, label='capacitive contributions')
+for idx, (perc, total) in enumerate(zip(percentages, total_heights)):
+    # Adjust the position of the annotation to be on top of the bar or slightly above
+    y_position = total if total > part_heights[idx] else part_heights[idx]
+    plt.text(idx, y_position, f'{perc:.1f}%', ha='center', va='bottom')
+plt.xlabel('Scan Rate (V/s)')  # Label for x-axis
+plt.ylabel('Integrated Area (mA*V/cm^2)')  # Label for y-axis
+plt.title('Capacitive contrbutions to total')  # Title for the bar chart
+plt.xticks(range(num_subplots), [f'{rate} V/s' for rate in scan_rates])  # Set x-tick labels to scan rates
+plt.legend()
+plt.show()
+
+
+###############################################################################
+
+#Extra thing for Ed
+#Ed has asked me to the impossible >:(
+#Nvm chat gpt saves the day 
+Bingo_bongo = data_set['current_cycle2']/data_set['scan_rate']
+#print(Bingo_bongo)
+plt.figure()
+for data_set in data_sets:
+    plt.plot(data_set['potential_cycle2'], data_set['current_cycle2'], label=f"{data_set['scan_rate']} V/s")
+plt.xlabel('Potential vs NHE (V)')
+plt.ylabel('Current Density (mA/cm$^{2})$')
+plt.legend(loc='best')  # Updated to 'best'
+plt.title('Current vs Potential')
+plt.show()
+plt.figure()
+
+
+#Testing stuff
+min_currents = [np.min(data_set['current_cycle2']) for data_set in data_sets]
+print('maximum current', max_currents)
+print('minimum current',min_currents)
+
+
+normalized_currents = []
+for data_set in data_sets:
+    normalized_current = data_set['current_cycle2'] / data_set['scan_rate']
+    normalized_currents.append(normalized_current)
+    plt.plot(data_set['potential_cycle2'], normalized_current, label=f"{data_set['scan_rate']} V/s")
+
+plt.xlabel('Potential vs NHE (V)')
+plt.ylabel('Normalized Current Density (mA/cm$^{2}$/V/s)')
+plt.legend(loc='best')
+plt.title('Normalized Current Density vs Potential (im not too sure if this name is correct)')
+plt.show()
+
+
+plt.figure()
+
+# Loop through each data set
+for data_set in data_sets:
+    # Get the indices where the potential is greater than -0.2
+    indices = data_set['potential_cycle2'] > 0.
+    
+    # Extract the parts of the data where the potential is greater than -0.2
+    filtered_potential = data_set['potential_cycle2'][indices]
+    filtered_current = data_set['current_cycle2'][indices] / data_set['scan_rate']
+    
+    # Plot the filtered normalized current density vs. filtered potential
+    plt.plot(filtered_potential, filtered_current, label=f"{data_set['scan_rate']} V/s")
+
+# Labeling the plot
+plt.xlabel('Potential vs NHE (V)')
+plt.ylabel('Normalized Current Density (mA/cm$^{2}$/V/s)')
+plt.legend(loc='lower right', prop={'size': 8})
+plt.title('cropped to make visulsation easier')
+plt.show()
+
+def lin(x, m, c):
+    return m*x+c
+
+#result = curve_fit(lin,data_sets[-1]["CathodicCurrent"])
